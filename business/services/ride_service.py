@@ -1,4 +1,5 @@
 from django.db import transaction
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
@@ -72,7 +73,10 @@ def send_ride_status_update(ride_id, status_value):
     print("Status:", status_value)
 
     try:
-        async_to_sync(channel_layer.group_send)(
+
+        async_to_sync(
+            channel_layer.group_send
+        )(
             group_name,
             {
                 "type": "ride_status_update",
@@ -86,6 +90,7 @@ def send_ride_status_update(ride_id, status_value):
         print("=== RIDE STATUS UPDATE SENT ===")
 
     except Exception as e:
+
         print("❌ WEBSOCKET STATUS UPDATE ERROR")
         print("Error type:", type(e).__name__)
         print("Error:", str(e))
@@ -100,12 +105,16 @@ def change_ride_status(ride, new_status):
     """
     Safely change ride status.
 
-    Performs:
+    Responsibilities:
 
-    1. Status transition validation
-    2. Database update
-    3. WebSocket notification after commit
-    4. Background notification after commit
+    1. Validate status transition.
+    2. Update ride status.
+    3. Register WebSocket notification after DB commit.
+    4. Register background notification after DB commit.
+
+    IMPORTANT:
+    This service does not use request.user.
+    User/role authorization belongs in the API view.
     """
 
     print("\n========================================")
@@ -117,25 +126,6 @@ def change_ride_status(ride, new_status):
     print("Ride ID:", ride.id)
     print("Current Status:", current_status)
     print("New Status:", new_status)
-# ========================================================
-# PASSENGER OWNERSHIP
-# ========================================================
-
-    if request.user.role == "USER":
-
-        if ride.passenger_id != request.user.id:
-
-            return Response(
-            {
-                "success": False,
-                "message": (
-                    "You are not the passenger "
-                    "of this ride."
-                ),
-                "data": None,
-            },
-            status=status.HTTP_403_FORBIDDEN,
-        )    
 
     # --------------------------------------------------------
     # Validate transition
@@ -147,6 +137,7 @@ def change_ride_status(ride, new_status):
     )
 
     if new_status not in allowed_statuses:
+
         raise ValueError(
             f"Cannot change ride status "
             f"from {current_status} to {new_status}."
@@ -169,9 +160,17 @@ def change_ride_status(ride, new_status):
     print("Ride ID:", ride.id)
     print("Status:", ride.status)
 
+    # --------------------------------------------------------
+    # Convert IDs/status to strings
+    # --------------------------------------------------------
+
     ride_id_string = str(ride.id)
+
     status_string = str(ride.status)
-    passenger_id_string = str(ride.passenger_id)
+
+    passenger_id_string = str(
+        ride.passenger_id
+    )
 
     # --------------------------------------------------------
     # WebSocket notification
@@ -185,7 +184,7 @@ def change_ride_status(ride, new_status):
     )
 
     # --------------------------------------------------------
-    # Background notifications
+    # DRIVER ARRIVING notification
     # --------------------------------------------------------
 
     if new_status == RideStatus.DRIVER_ARRIVING:
@@ -200,6 +199,10 @@ def change_ride_status(ride, new_status):
             )
         )
 
+    # --------------------------------------------------------
+    # RIDE STARTED notification
+    # --------------------------------------------------------
+
     elif new_status == RideStatus.STARTED:
 
         transaction.on_commit(
@@ -212,6 +215,10 @@ def change_ride_status(ride, new_status):
             )
         )
 
+    # --------------------------------------------------------
+    # RIDE COMPLETED notification
+    # --------------------------------------------------------
+
     elif new_status == RideStatus.COMPLETED:
 
         transaction.on_commit(
@@ -219,7 +226,10 @@ def change_ride_status(ride, new_status):
                 user_id=passenger_id_string,
                 notification_type="RIDE_COMPLETED",
                 title="Ride Completed",
-                message="Your ride has been completed successfully.",
+                message=(
+                    "Your ride has been completed "
+                    "successfully."
+                ),
                 ride_id=ride_id_string,
             )
         )
@@ -239,8 +249,18 @@ def accept_ride(ride_id, driver):
     """
     Safely accept a ride.
 
-    Prevents two drivers from accepting
-    the same ride simultaneously.
+    Business rules:
+
+    1. Lock the ride row.
+    2. Ride must be REQUESTED.
+    3. Passenger cannot also be the driver.
+    4. Driver must be ONLINE.
+    5. Driver cannot have another active ride.
+    6. Driver must have an active vehicle.
+    7. Assign driver and vehicle.
+    8. Change status to ACCEPTED.
+    9. Send WebSocket update after commit.
+    10. Notify passenger after commit.
     """
 
     print("\n========================================")
@@ -257,24 +277,32 @@ def accept_ride(ride_id, driver):
     ride = (
         Ride.objects
         .select_for_update()
-        .get(pk=ride_id)
+        .get(
+            pk=ride_id
+        )
     )
 
-    print("Current ride status:", ride.status)
-# --------------------------------------------------------
-# Passenger cannot be the driver
-# --------------------------------------------------------
+    print(
+        "Current ride status:",
+        ride.status,
+    )
+
+    # --------------------------------------------------------
+    # Passenger cannot be the driver
+    # --------------------------------------------------------
 
     if ride.passenger_id == driver.user_id:
-      raise ValueError(
-        "Passenger cannot be the same user as the driver."
-    )
+
+        raise ValueError(
+            "Passenger cannot be the same user as the driver."
+        )
 
     # --------------------------------------------------------
     # Ride must be REQUESTED
     # --------------------------------------------------------
 
     if ride.status != RideStatus.REQUESTED:
+
         raise ValueError(
             f"Ride cannot be accepted because "
             f"its current status is {ride.status}."
@@ -285,6 +313,7 @@ def accept_ride(ride_id, driver):
     # --------------------------------------------------------
 
     if driver.availability_status != "ONLINE":
+
         raise ValueError(
             "Driver is not available."
         )
@@ -306,6 +335,7 @@ def accept_ride(ride_id, driver):
     )
 
     if active_ride:
+
         raise ValueError(
             "Driver already has an active ride."
         )
@@ -320,21 +350,39 @@ def accept_ride(ride_id, driver):
             driver=driver,
             is_active=True,
         )
+        .select_related(
+            "vehicle_type",
+        )
         .first()
     )
 
     if not vehicle:
+
         raise ValueError(
             "Driver does not have an active vehicle."
         )
 
     # --------------------------------------------------------
-    # Assign driver and vehicle
+    # Assign driver
     # --------------------------------------------------------
 
     ride.driver = driver
+
+    # --------------------------------------------------------
+    # Assign vehicle
+    # --------------------------------------------------------
+
     ride.vehicle = vehicle
+
+    # --------------------------------------------------------
+    # Change status
+    # --------------------------------------------------------
+
     ride.status = RideStatus.ACCEPTED
+
+    # --------------------------------------------------------
+    # Save
+    # --------------------------------------------------------
 
     ride.save(
         update_fields=[
@@ -351,9 +399,17 @@ def accept_ride(ride_id, driver):
     print("Status:", ride.status)
     print("Vehicle:", vehicle)
 
+    # --------------------------------------------------------
+    # IDs for background tasks
+    # --------------------------------------------------------
+
     ride_id_string = str(ride.id)
+
     status_string = str(ride.status)
-    passenger_id_string = str(ride.passenger_id)
+
+    passenger_id_string = str(
+        ride.passenger_id
+    )
 
     # --------------------------------------------------------
     # WebSocket update
@@ -375,7 +431,10 @@ def accept_ride(ride_id, driver):
             user_id=passenger_id_string,
             notification_type="RIDE_ACCEPTED",
             title="Ride Accepted",
-            message="Your ride has been accepted by a driver.",
+            message=(
+                "Your ride has been accepted "
+                "by a driver."
+            ),
             ride_id=ride_id_string,
         )
     )
@@ -395,12 +454,14 @@ def cancel_ride(ride, user):
     """
     Cancel a ride.
 
-    Current business rule:
-        Only passenger can cancel.
+    Business rules:
 
-    Allowed:
-        REQUESTED
-        ACCEPTED
+    1. Only passenger can cancel.
+    2. Ride can only be cancelled while REQUESTED.
+    3. Ride can only be cancelled while ACCEPTED.
+    4. Change status to CANCELLED.
+    5. Send WebSocket update after commit.
+    6. Notify assigned driver after commit.
     """
 
     print("\n========================================")
@@ -413,10 +474,11 @@ def cancel_ride(ride, user):
     print("Current Status:", ride.status)
 
     # --------------------------------------------------------
-    # Check passenger
+    # Check passenger ownership
     # --------------------------------------------------------
 
-    if ride.passenger != user:
+    if ride.passenger_id != user.id:
+
         raise PermissionError(
             "Only the passenger can cancel this ride."
         )
@@ -429,6 +491,7 @@ def cancel_ride(ride, user):
         RideStatus.REQUESTED,
         RideStatus.ACCEPTED,
     ]:
+
         raise ValueError(
             f"Ride cannot be cancelled because "
             f"its current status is {ride.status}."
@@ -439,6 +502,10 @@ def cancel_ride(ride, user):
     # --------------------------------------------------------
 
     ride.status = RideStatus.CANCELLED
+
+    # --------------------------------------------------------
+    # Save
+    # --------------------------------------------------------
 
     ride.save(
         update_fields=[
@@ -451,7 +518,12 @@ def cancel_ride(ride, user):
     print("Ride ID:", ride.id)
     print("Status:", ride.status)
 
+    # --------------------------------------------------------
+    # Convert IDs to strings
+    # --------------------------------------------------------
+
     ride_id_string = str(ride.id)
+
     status_string = str(ride.status)
 
     # --------------------------------------------------------
@@ -466,7 +538,7 @@ def cancel_ride(ride, user):
     )
 
     # --------------------------------------------------------
-    # Notify driver if one is assigned
+    # Notify assigned driver
     # --------------------------------------------------------
 
     if ride.driver:
@@ -480,7 +552,10 @@ def cancel_ride(ride, user):
                 user_id=driver_user_id_string,
                 notification_type="RIDE_CANCELLED",
                 title="Ride Cancelled",
-                message="The passenger cancelled the ride.",
+                message=(
+                    "The passenger cancelled "
+                    "the ride."
+                ),
                 ride_id=ride_id_string,
             )
         )
