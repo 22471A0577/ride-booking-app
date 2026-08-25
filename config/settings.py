@@ -38,6 +38,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -48,6 +49,9 @@ INSTALLED_APPS = [
     'rest_framework',
     'business',
     "corsheaders",
+    "channels",
+    "debug_toolbar",
+   
 
 ]
 
@@ -61,7 +65,9 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
 ]
+
 
 
 ROOT_URLCONF = 'config.urls'
@@ -157,4 +163,69 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'business.User'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+]
+ASGI_APPLICATION = "config.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [
+                ("127.0.0.1", 6379),
+            ],
+        },
+    },
+}
+ASGI_APPLICATION = "config.asgi.application"
+
+# ============================================================
+# CELERY + REDIS CONFIGURATION
+# ============================================================
+
+# Redis database 0 → Celery message broker
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
+
+# Redis database 1 → Celery task results
+CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/1"
+
+# Security / serialization
+CELERY_ACCEPT_CONTENT = [
+    "json",
+]
+
+CELERY_TASK_SERIALIZER = "json"
+
+CELERY_RESULT_SERIALIZER = "json"
+
+# Timezone
+CELERY_TIMEZONE = "Asia/Kolkata"
+
+CELERY_ENABLE_UTC = True
+
+# Show when a task has started
+CELERY_TASK_TRACK_STARTED = True
+
+# Maximum task execution time: 30 minutes
+CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# Acknowledgement happens after task execution
+CELERY_TASK_ACKS_LATE = True
+
+# ============================================================
+# DJANGO REDIS CACHE CONFIGURATION
+# ============================================================
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/2",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "KEY_PREFIX": "ride_booking",
+        "TIMEOUT": 300,
+    }
+}
+INTERNAL_IPS = [
+    "127.0.0.1",
 ]

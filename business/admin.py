@@ -16,23 +16,23 @@ class DriverProfileAdmin(admin.ModelAdmin):
         "user",
         "license_number",
         "phone_number",
-        "is_available",
+        "availability_status",
         "created_at",
     )
 
     search_fields = (
-        "user__username",
+        "user__email",
         "license_number",
         "phone_number",
     )
 
     list_filter = (
-        "is_available",
+        "availability_status",
         "created_at",
     )
 
     ordering = (
-        "user__username",
+        "user__email",
     )
 
     filter_horizontal = (
@@ -71,7 +71,7 @@ class VehicleAdmin(admin.ModelAdmin):
     search_fields = (
         "vehicle_number",
         "model_name",
-        "driver__user__username",
+        "driver__user__email",
     )
 
     list_filter = (
@@ -115,8 +115,8 @@ class RideAdmin(admin.ModelAdmin):
     )
 
     search_fields = (
-        "passenger__username",
-        "driver__user__username",
+        "passenger__email",
+        "driver__user__email",
         "vehicle__vehicle_number",
     )
 

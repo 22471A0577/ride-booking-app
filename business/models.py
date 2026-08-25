@@ -4,6 +4,10 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 
 
+# ============================================================
+# USER
+# ============================================================
+
 class UserManager(BaseUserManager):
 
     def create_user(self, email, password=None, **extra_fields):
@@ -75,7 +79,14 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+
+# ============================================================
+# SERVICE AREA
+# ============================================================
+
 class ServiceArea(models.Model):
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -97,7 +108,13 @@ class ServiceArea(models.Model):
     def __str__(self):
         return self.name
 
+
+# ============================================================
+# DRIVER PROFILE
+# ============================================================
+
 class DriverProfile(models.Model):
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -114,6 +131,7 @@ class DriverProfile(models.Model):
         max_length=50,
         unique=True
     )
+
     service_areas = models.ManyToManyField(
         ServiceArea,
         related_name="drivers",
@@ -124,10 +142,19 @@ class DriverProfile(models.Model):
         max_length=15,
         unique=True
     )
+    class AvailabilityStatus(models.TextChoices):
+        ONLINE = "ONLINE", "Online"
+        OFFLINE = "OFFLINE", "Offline"
+        BUSY = "BUSY", "Busy"
 
-    is_available = models.BooleanField(
-        default=True
+    availability_status = models.CharField(
+        max_length=10,
+        choices=AvailabilityStatus.choices,
+        default=AvailabilityStatus.OFFLINE,
+        db_index=True    
     )
+
+    
 
     created_at = models.DateTimeField(
         auto_now_add=True
@@ -143,8 +170,66 @@ class DriverProfile(models.Model):
     def __str__(self):
         return self.user.email
 
+    #DRIVER LOCATION MODEL
+
+
+# ============================================================
+# DRIVER LOCATION
+# ============================================================
+
+class DriverLocation(models.Model):
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+
+    driver = models.OneToOneField(
+        DriverProfile,
+        on_delete=models.CASCADE,
+        related_name="location"
+    )
+
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6
+    )
+
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6
+    )
+
+    last_updated = models.DateTimeField(
+        auto_now=True
+    )
+
+    class Meta:
+        db_table = "driver_locations"
+
+        indexes = [
+    models.Index(
+        fields=["latitude", "longitude"],
+        name="driver_loc_coords_idx",
+    ),
+    models.Index(
+        fields=["driver"],
+        name="driver_loc_driver_idx",
+    ),
+]
+
+    def __str__(self):
+        return (
+            f"{self.driver.user.email} - "
+            f"{self.latitude}, {self.longitude}"
+        )
+# ============================================================
+# VEHICLE TYPE
+# ============================================================
 
 class VehicleType(models.Model):
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -171,7 +256,12 @@ class VehicleType(models.Model):
         return self.name
 
 
+# ============================================================
+# VEHICLE
+# ============================================================
+
 class Vehicle(models.Model):
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -228,7 +318,12 @@ class Vehicle(models.Model):
         return self.vehicle_number
 
 
+# ============================================================
+# RIDE STATUS
+# ============================================================
+
 class RideStatus(models.TextChoices):
+
     REQUESTED = "REQUESTED", "Requested"
     ACCEPTED = "ACCEPTED", "Accepted"
     DRIVER_ARRIVING = "DRIVER_ARRIVING", "Driver Arriving"
@@ -236,7 +331,13 @@ class RideStatus(models.TextChoices):
     COMPLETED = "COMPLETED", "Completed"
     CANCELLED = "CANCELLED", "Cancelled"
 
+
+# ============================================================
+# LOCATION
+# ============================================================
+
 class Location(models.Model):
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -265,14 +366,21 @@ class Location(models.Model):
         db_table = "locations"
 
         indexes = [
-            models.Index(fields=["latitude", "longitude"]),
+            models.Index(
+                fields=["latitude", "longitude"]
+            ),
         ]
 
     def __str__(self):
         return self.address
 
 
+# ============================================================
+# RIDE
+# ============================================================
+
 class Ride(models.Model):
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
@@ -344,14 +452,182 @@ class Ride(models.Model):
         db_table = "rides"
 
         indexes = [
-            models.Index(fields=["passenger"]),
-            models.Index(fields=["driver"]),
-            models.Index(fields=["vehicle"]),
-            models.Index(fields=["status"]),
-            models.Index(fields=["requested_at"]),
+
+            # Individual indexes
+            models.Index(
+                fields=["passenger"],
+                name="ride_passenger_idx",
+            ),
+
+            models.Index(
+                fields=["driver"],
+                name="ride_driver_idx",
+            ),
+
+            models.Index(
+                fields=["vehicle"],
+                name="ride_vehicle_idx",
+            ),
+
+            models.Index(
+                fields=["status"],
+                name="ride_status_idx",
+            ),
+
+            models.Index(
+                fields=["requested_at"],
+                name="ride_requested_at_idx",
+            ),
+
+            models.Index(
+                fields=["updated_at"],
+                name="ride_updated_at_idx",
+            ),
+
+            # Composite indexes
+
+            models.Index(
+                fields=[
+                    "passenger",
+                    "status",
+                    "-requested_at",
+                ],
+                name="ride_pass_status_date_idx",
+            ),
+
+            models.Index(
+                fields=[
+                    "driver",
+                    "status",
+                    "-requested_at",
+                ],
+                name="ride_driver_status_date_idx",
+            ),
+
+            models.Index(
+                fields=[
+                    "status",
+                    "-requested_at",
+                ],
+                name="ride_status_date_idx",
+            ),
+
+            models.Index(
+                fields=[
+                    "passenger",
+                    "-requested_at",
+                ],
+                name="ride_passenger_date_idx",
+            ),
+
+            models.Index(
+                fields=[
+                    "driver",
+                    "-requested_at",
+                ],
+                name="ride_driver_date_idx",
+            ),
+
+            models.Index(
+                fields=[
+                    "fare",
+                ],
+                name="ride_fare_idx",
+            ),
         ]
 
     def __str__(self):
         return f"Ride {self.id} - {self.status}"
 
-   
+# ============================================================
+# NOTIFICATION
+# ============================================================
+
+class Notification(models.Model):
+
+    NOTIFICATION_TYPES = (
+        ("RIDE_REQUEST", "Ride Request"),
+        ("RIDE_ACCEPTED", "Ride Accepted"),
+        ("DRIVER_ARRIVING", "Driver Arriving"),
+        ("RIDE_STARTED", "Ride Started"),
+        ("RIDE_COMPLETED", "Ride Completed"),
+        ("RIDE_CANCELLED", "Ride Cancelled"),
+        ("DRIVER_LOCATION", "Driver Location"),
+        ("SYSTEM", "System"),
+    )
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+
+    ride = models.ForeignKey(
+        Ride,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="notifications",
+    )
+
+    notification_type = models.CharField(
+        max_length=30,
+        choices=NOTIFICATION_TYPES,
+    )
+
+    title = models.CharField(
+        max_length=255,
+    )
+
+    message = models.TextField()
+
+    is_read = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    event_key = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+        indexes = [
+            models.Index(
+                fields=["user", "is_read"]
+            ),
+            models.Index(
+                fields=["user", "created_at"]
+            ),
+            models.Index(
+                fields=["notification_type"]
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "ride",
+                    "notification_type",
+                ],
+                name="unique_user_ride_notification",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.title}"

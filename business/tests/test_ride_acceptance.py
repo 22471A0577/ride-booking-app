@@ -35,7 +35,7 @@ class RideAcceptanceTests(TestCase):
             user=self.driver_user,
             license_number="DL-TEST-001",
             phone_number="9999999999",
-            is_available=True,
+            availability_status="ONLINE",
         )
 
         # Vehicle type
@@ -113,8 +113,8 @@ class RideAcceptanceTests(TestCase):
 
     def test_unavailable_driver_cannot_accept(self):
 
-        self.driver.is_available = False
-        self.driver.save()
+        self.driver.availability_status = "OFFLINE"
+        self.driver.save(update_fields=["availability_status"])
 
         with self.assertRaises(ValueError):
             accept_ride(
@@ -154,3 +154,4 @@ class RideAcceptanceTests(TestCase):
                 second_ride.id,
                 self.driver,
             )
+
