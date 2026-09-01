@@ -1,6 +1,7 @@
 from math import radians, sin, cos, sqrt, atan2
 
 from django.core.cache import cache
+from django.db import transaction
 
 from business.models import DriverLocation
 
@@ -15,7 +16,7 @@ def calculate_distance_km(
     longitude2,
 ):
     """
-    Calculate the distance between two coordinates
+    Calculate distance between two coordinates
     using the Haversine formula.
     """
 
@@ -43,6 +44,31 @@ def calculate_distance_km(
     return EARTH_RADIUS_KM * c
 
 
+@transaction.atomic
+def update_driver_location(
+    driver,
+    latitude,
+    longitude,
+):
+    """
+    Create or update the driver's latest GPS location.
+    """
+
+    location, created = DriverLocation.objects.update_or_create(
+        driver=driver,
+        defaults={
+            "latitude": latitude,
+            "longitude": longitude,
+        },
+    )
+
+    # Old nearby-driver cache entries may contain
+    # the driver's previous location.
+    cache.clear()
+
+    return location
+
+
 def get_nearby_drivers(
     latitude,
     longitude,
@@ -54,10 +80,6 @@ def get_nearby_drivers(
     Uses Redis caching to avoid repeated database queries.
     """
 
-    # ========================================================
-    # CACHE KEY
-    # ========================================================
-
     cache_key = (
         f"nearby_drivers:"
         f"{round(float(latitude), 4)}:"
@@ -65,19 +87,11 @@ def get_nearby_drivers(
         f"{round(float(radius_km), 2)}"
     )
 
-    # ========================================================
-    # CACHE HIT
-    # ========================================================
-
     cached_drivers = cache.get(cache_key)
 
     if cached_drivers is not None:
         print("CACHE HIT:", cache_key)
         return cached_drivers
-
-    # ========================================================
-    # CACHE MISS
-    # ========================================================
 
     print("CACHE MISS:", cache_key)
 
@@ -118,10 +132,6 @@ def get_nearby_drivers(
     nearby_drivers.sort(
         key=lambda driver: driver["distance_km"]
     )
-
-    # ========================================================
-    # STORE IN REDIS
-    # ========================================================
 
     cache.set(
         cache_key,

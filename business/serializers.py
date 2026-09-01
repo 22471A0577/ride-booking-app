@@ -520,90 +520,170 @@ class NearbyDriverSerializer(serializers.Serializer):
     latitude = serializers.FloatField()
 
     longitude = serializers.FloatField()
-def validate(self, attrs):
+# ============================================================
+# RIDE SERIALIZER
+# ============================================================
 
-    request = self.context.get("request")
+class RideSerializer(serializers.ModelSerializer):
 
-    passenger = request.user if request else None
+    passenger_name = serializers.EmailField(
+        source="passenger.email",
+        read_only=True,
+    )
 
-    pickup = attrs.get("pickup_location")
-    drop = attrs.get("drop_location")
-    ride_type = attrs.get("ride_type")
-    driver = attrs.get("driver")
+    driver_name = serializers.EmailField(
+        source="driver.user.email",
+        read_only=True,
+        allow_null=True,
+    )
 
-    # ====================================================
-    # PASSENGER VALIDATION
-    # ====================================================
+    vehicle_number = serializers.CharField(
+        source="vehicle.vehicle_number",
+        read_only=True,
+        allow_null=True,
+    )
 
-    if passenger and passenger.role != "USER":
+    pickup_address = serializers.CharField(
+        source="pickup_location.address",
+        read_only=True,
+    )
 
-        raise serializers.ValidationError({
-            "passenger":
-                "Only normal users can create rides."
-        })
+    drop_address = serializers.CharField(
+        source="drop_location.address",
+        read_only=True,
+    )
 
-    # ====================================================
-    # PICKUP / DROP VALIDATION
-    # ====================================================
+    ride_type_name = serializers.CharField(
+        source="ride_type.name",
+        read_only=True,
+    )
 
-    if pickup and drop and pickup == drop:
+    class Meta:
+        model = Ride
 
-        raise serializers.ValidationError({
-            "drop_location":
-                "Pickup and drop locations cannot be the same."
-        })
+        fields = [
+            "id",
 
-    # ====================================================
-    # RIDE TYPE VALIDATION
-    # ====================================================
+            "passenger",
+            "passenger_name",
 
-    if not ride_type:
+            "driver",
+            "driver_name",
 
-        raise serializers.ValidationError({
-            "ride_type":
-                "Ride type is required."
-        })
+            "vehicle",
+            "vehicle_number",
 
-    # ====================================================
-    # PASSENGER / DRIVER VALIDATION
-    # ====================================================
+            "ride_type",
+            "ride_type_name",
 
-    if passenger and driver:
+            "pickup_location",
+            "pickup_address",
 
-        if driver.user_id == passenger.id:
+            "drop_location",
+            "drop_address",
 
-            raise serializers.ValidationError({
-                "driver":
-                    "Passenger cannot be the same user as the driver."
-            })
+            "status",
+            "fare",
+            "requested_at",
+            "updated_at",
+        ]
 
-    # ====================================================
-    # ACTIVE RIDE VALIDATION
-    # ====================================================
+        read_only_fields = [
+            "id",
 
-    active_statuses = [
-        RideStatus.REQUESTED,
-        RideStatus.ACCEPTED,
-        RideStatus.DRIVER_ARRIVING,
-        RideStatus.STARTED,
-    ]
+            "passenger",
+            "passenger_name",
 
-    if passenger:
+            "driver",
+            "driver_name",
 
-        conflicting_ride = (
-            Ride.objects
-            .filter(
-                passenger=passenger,
-                status__in=active_statuses,
-            )
-            .exists()
-        )
+            "vehicle",
+            "vehicle_number",
 
-        if conflicting_ride:
+            "ride_type_name",
+
+            "pickup_address",
+            "drop_address",
+
+            "status",
+            "fare",
+
+            "requested_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+
+        request = self.context.get("request")
+        passenger = request.user if request else None
+
+        pickup = attrs.get("pickup_location")
+        drop = attrs.get("drop_location")
+        ride_type = attrs.get("ride_type")
+
+        # DRIVER IS READ-ONLY IN THIS SERIALIZER
+        # so do not validate attrs.get("driver") here.
+
+        # ====================================================
+        # PASSENGER VALIDATION
+        # ====================================================
+
+        if passenger and passenger.role != "USER":
 
             raise serializers.ValidationError({
                 "passenger":
-                    "You already have an active ride."
+                    "Only normal users can create rides."
             })
 
-    return attrs
+        # ====================================================
+        # PICKUP / DROP VALIDATION
+        # ====================================================
+
+        if pickup and drop and pickup == drop:
+
+            raise serializers.ValidationError({
+                "drop_location":
+                    "Pickup and drop locations cannot be the same."
+            })
+
+        # ====================================================
+        # RIDE TYPE VALIDATION
+        # ====================================================
+
+        if not ride_type:
+
+            raise serializers.ValidationError({
+                "ride_type":
+                    "Ride type is required."
+            })
+
+        # ====================================================
+        # ACTIVE RIDE VALIDATION
+        # ====================================================
+
+        active_statuses = [
+            RideStatus.REQUESTED,
+            RideStatus.ACCEPTED,
+            RideStatus.DRIVER_ARRIVING,
+            RideStatus.STARTED,
+        ]
+
+        if passenger:
+
+            conflicting_ride = (
+                Ride.objects
+                .filter(
+                    passenger=passenger,
+                    status__in=active_statuses,
+                )
+                .exists()
+            )
+
+            if conflicting_ride:
+
+                raise serializers.ValidationError({
+                    "passenger":
+                        "You already have an active ride."
+                })
+
+        return attrs

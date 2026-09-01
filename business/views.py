@@ -42,6 +42,7 @@ from .services.ride_service import (
 )
 
 from .services.driver_location_service import (
+    update_driver_location,
     get_nearby_drivers,
 )
 
@@ -1600,4 +1601,4 @@ class BadRideListAPIView(APIView):
                 "drop": ride.drop_location.address,
             })
 
-        return Response(data)    
+        return Response(data)

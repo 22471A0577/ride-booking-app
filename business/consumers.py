@@ -19,6 +19,7 @@ class RideConsumer(AsyncWebsocketConsumer):
         print("========================================")
 
         try:
+
             # -------------------------------------------------
             # Get ride ID from URL
             # -------------------------------------------------
@@ -46,7 +47,7 @@ class RideConsumer(AsyncWebsocketConsumer):
             )
 
             # -------------------------------------------------
-            # Check authentication
+            # Authentication check
             # -------------------------------------------------
 
             if self.user is None:
@@ -193,9 +194,11 @@ class RideConsumer(AsyncWebsocketConsumer):
             )
 
             try:
+
                 await self.close(
                     code=4000
                 )
+
             except Exception:
                 pass
 
@@ -413,8 +416,15 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         if message_type == "driver_location":
 
-            # Only drivers should send driver location
+            # -------------------------------------------------
+            # Only drivers can send location
+            # -------------------------------------------------
+
             if self.user.role != "DRIVER":
+
+                print(
+                    "❌ NON-DRIVER TRIED TO SEND LOCATION"
+                )
 
                 await self.send(
                     text_data=json.dumps(
@@ -430,9 +440,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
                 return
 
-            driver_id = data.get(
-                "driver_id"
-            )
+            # -------------------------------------------------
+            # IMPORTANT FIX
+            # -------------------------------------------------
+
+            driver_id = str(self.user.id)
 
             latitude = data.get(
                 "latitude"
@@ -457,12 +469,38 @@ class RideConsumer(AsyncWebsocketConsumer):
                 longitude
             )
 
+            # -------------------------------------------------
+            # Validate coordinates
+            # -------------------------------------------------
+
+            if latitude is None or longitude is None:
+
+                print(
+                    "❌ LOCATION COORDINATES MISSING"
+                )
+
+                await self.send(
+                    text_data=json.dumps(
+                        {
+                            "type": "error",
+                            "message": (
+                                "Latitude and longitude "
+                                "are required."
+                            ),
+                        }
+                    )
+                )
+
+                return
+
+            # -------------------------------------------------
+            # Broadcast driver location
+            # -------------------------------------------------
+
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
-                    "type": (
-                        "driver_location_update"
-                    ),
+                    "type": "driver_location_update",
                     "driver_id": driver_id,
                     "latitude": latitude,
                     "longitude": longitude,
@@ -509,6 +547,21 @@ class RideConsumer(AsyncWebsocketConsumer):
             "=== DRIVER LOCATION EVENT ==="
         )
 
+        print(
+            "Driver ID:",
+            event.get("driver_id")
+        )
+
+        print(
+            "Latitude:",
+            event.get("latitude")
+        )
+
+        print(
+            "Longitude:",
+            event.get("longitude")
+        )
+
         await self.send(
             text_data=json.dumps(
                 {
@@ -526,6 +579,10 @@ class RideConsumer(AsyncWebsocketConsumer):
             )
         )
 
+        print(
+            "=== DRIVER LOCATION SENT TO CLIENT ==="
+        )
+
     # =========================================================
     # RIDE STATUS EVENT
     # =========================================================
@@ -537,6 +594,16 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         print(
             "=== RIDE STATUS EVENT ==="
+        )
+
+        print(
+            "Status:",
+            event.get("status")
+        )
+
+        print(
+            "Message:",
+            event.get("message")
         )
 
         await self.send(
@@ -551,4 +618,8 @@ class RideConsumer(AsyncWebsocketConsumer):
                     ),
                 }
             )
+        )
+
+        print(
+            "=== RIDE STATUS SENT TO CLIENT ==="
         )
