@@ -10,8 +10,6 @@ from .views import (
     # DRIVER
     # ========================================================
 
-    BadRideListAPIView,
-
     DriverListCreateAPIView,
     DriverDetailAPIView,
 
@@ -275,9 +273,4 @@ urlpatterns = [
         NotificationReadAllAPIView.as_view(),
         name="notification-read-all",
     ),
-    path(
-    "rides/bad/",
-    BadRideListAPIView.as_view(),
-    name="bad-ride-list",
-),
 ]

@@ -62,13 +62,10 @@ def update_driver_location(
         },
     )
 
-    # Old nearby-driver cache entries may contain
-    # the driver's previous location.
+    # Invalidate cached nearby-driver results
     cache.clear()
 
-    return location
-
-
+    return location, created
 def get_nearby_drivers(
     latitude,
     longitude,

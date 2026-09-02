@@ -61,7 +61,7 @@ def send_ride_status_update(ride_id, status_value):
     channel_layer = get_channel_layer()
 
     if channel_layer is None:
-        print("❌ Channel layer is not configured")
+        print("Channel layer is not configured")
         return
 
     group_name = f"ride_{ride_id}"
@@ -91,7 +91,7 @@ def send_ride_status_update(ride_id, status_value):
 
     except Exception as e:
 
-        print("❌ WEBSOCKET STATUS UPDATE ERROR")
+        print("WEBSOCKET STATUS UPDATE ERROR")
         print("Error type:", type(e).__name__)
         print("Error:", str(e))
 
@@ -112,8 +112,6 @@ def change_ride_status(ride, new_status):
     3. Register WebSocket notification after DB commit.
     4. Register background notification after DB commit.
 
-    IMPORTANT:
-    This service does not use request.user.
     User/role authorization belongs in the API view.
     """
 
@@ -237,6 +235,8 @@ def change_ride_status(ride, new_status):
     print("=== WEBSOCKET UPDATE REGISTERED ===")
     print("=== NOTIFICATION TASK REGISTERED ===")
 
+    # IMPORTANT:
+    # Return the updated ride.
     return ride
 
 

@@ -29,7 +29,7 @@ def notify_ride_requested(ride):
 
     return create_notification(
         user=ride.driver.user,
-        notification_type="RIDE_REQUESTED",
+        notification_type="RIDE_REQUEST",
         title="New Ride Request",
         message="You have received a new ride request.",
         ride=ride,
@@ -122,4 +122,80 @@ def notify_ride_cancelled(ride, cancelled_by=None):
         title="Ride Cancelled",
         message="Your ride has been cancelled.",
         ride=ride,
+    )
+
+
+# =========================================================
+# NOTIFICATION QUERY SERVICES
+# =========================================================
+
+def get_user_notifications(user):
+    """
+    Return only notifications belonging to the authenticated user.
+    """
+
+    return (
+        Notification.objects
+        .filter(user=user)
+        .select_related("ride")
+        .order_by("-id")
+    )
+
+
+def get_notification_for_user(notification_id, user):
+    """
+    Return a notification only if it belongs to the authenticated user.
+
+    This prevents IDOR / broken access control.
+    """
+
+    return (
+        Notification.objects
+        .filter(
+            id=notification_id,
+            user=user,
+        )
+        .select_related("ride")
+        .first()
+    )
+
+def mark_notification_as_read(notification_id, user):
+    """
+    Mark a notification as read only if it belongs
+    to the authenticated user.
+    """
+
+    if not user or not user.is_authenticated:
+        return None
+
+    notification = (
+        Notification.objects
+        .filter(
+            id=notification_id,
+            user=user,
+        )
+        .first()
+    )
+
+    if not notification:
+        return None
+
+    notification.is_read = True
+    notification.save(update_fields=["is_read"])
+
+    return notification
+def mark_all_notifications_as_read(user):
+    """
+    Mark all notifications belonging to the authenticated user as read.
+
+    Notifications belonging to other users are never modified.
+    """
+
+    return (
+        Notification.objects
+        .filter(
+            user=user,
+            is_read=False,
+        )
+        .update(is_read=True)
     )
