@@ -1,3 +1,5 @@
+from datetime import datetime, time, timedelta
+
 from django.db import models
 from django.db.models import Avg, Count, Max, Min, Sum
 from django.utils import timezone
@@ -13,6 +15,9 @@ def base_ride_queryset():
     """
     Common optimized queryset used by ride history
     and other ride queries.
+
+    select_related() prevents additional database queries
+    when related objects are accessed by serializers.
     """
 
     return (
@@ -251,15 +256,62 @@ def get_driver_ride_history(user):
 
 
 # ============================================================
+# DATE RANGE HELPER
+# ============================================================
+
+def _get_day_range(date_value):
+    """
+    Return timezone-aware start and end datetimes for a date.
+
+    The end value is exclusive.
+
+    Example:
+
+        start = 2026-09-02 00:00:00
+        end   = 2026-09-03 00:00:00
+
+    Filtering with:
+
+        requested_at__gte=start
+        requested_at__lt=end
+
+    is more index-friendly than applying __date to
+    the requested_at database column.
+    """
+
+    start_datetime = timezone.make_aware(
+        datetime.combine(
+            date_value,
+            time.min,
+        )
+    )
+
+    end_datetime = start_datetime + timedelta(days=1)
+
+    return start_datetime, end_datetime
+
+
+# ============================================================
 # DAILY RIDE COUNT
 # ============================================================
 
 def get_daily_ride_count(user):
     """
     Count rides created today.
+
+    Uses a datetime range instead of requested_at__date
+    so the database can make better use of an index on
+    requested_at.
     """
 
     today = timezone.localdate()
+
+    start_datetime, end_datetime = _get_day_range(today)
+
+    date_filter = {
+        "requested_at__gte": start_datetime,
+        "requested_at__lt": end_datetime,
+    }
 
     # --------------------------------------------------------
     # USER
@@ -269,7 +321,7 @@ def get_daily_ride_count(user):
 
         return Ride.objects.filter(
             passenger=user,
-            requested_at__date=today,
+            **date_filter,
         ).count()
 
     # --------------------------------------------------------
@@ -280,7 +332,7 @@ def get_daily_ride_count(user):
 
         return Ride.objects.filter(
             driver__user=user,
-            requested_at__date=today,
+            **date_filter,
         ).count()
 
     # --------------------------------------------------------
@@ -290,7 +342,7 @@ def get_daily_ride_count(user):
     if user.role == "ADMIN":
 
         return Ride.objects.filter(
-            requested_at__date=today,
+            **date_filter,
         ).count()
 
     return 0
@@ -458,6 +510,14 @@ def get_ride_statistics(user):
 # ============================================================
 
 def base_filter_queryset():
+    """
+    Base queryset for advanced ride filtering.
+
+    select_related() avoids N+1 queries when related
+    passenger, driver, vehicle, location, and ride type
+    objects are accessed.
+    """
+
     return (
         Ride.objects
         .select_related(
@@ -602,8 +662,12 @@ def filter_rides(
 
     if start_date:
 
+        start_datetime, _ = _get_day_range(
+            start_date
+        )
+
         queryset = queryset.filter(
-            requested_at__date__gte=start_date
+            requested_at__gte=start_datetime
         )
 
     # ========================================================
@@ -612,8 +676,12 @@ def filter_rides(
 
     if end_date:
 
+        _, end_datetime = _get_day_range(
+            end_date
+        )
+
         queryset = queryset.filter(
-            requested_at__date__lte=end_date
+            requested_at__lt=end_datetime
         )
 
     # ========================================================

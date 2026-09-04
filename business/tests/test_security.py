@@ -54,7 +54,7 @@ class SecurityTests(APITestCase):
     def test_notification_api_requires_authentication(self):
 
         response = self.client.get(
-            "/api/notifications/"
+            "/api/v1/notifications/"
         )
 
         self.assertEqual(
@@ -74,7 +74,7 @@ class SecurityTests(APITestCase):
         )
 
         response = self.client.get(
-            "/api/notifications/"
+            "/api/v1/notifications/"
         )
 
         self.assertEqual(
@@ -99,7 +99,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.user1)
 
         response = self.client.get(
-            "/api/notifications/"
+            "/api/v1/notifications/"
         )
 
         self.assertEqual(
@@ -124,7 +124,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.user1)
 
         response = self.client.get(
-            "/api/notifications/"
+            "/api/v1/notifications/"
         )
 
         self.assertEqual(
@@ -156,7 +156,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.user1)
 
         response = self.client.patch(
-            f"/api/notifications/{notification.id}/read/"
+            f"/api/v1/notifications/{notification.id}/read/"
         )
 
         self.assertEqual(
@@ -187,7 +187,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.user1)
 
         response = self.client.patch(
-            f"/api/notifications/{notification.id}/read/"
+            f"/api/v1/notifications/{notification.id}/read/"
         )
 
         self.assertEqual(
@@ -225,7 +225,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.user1)
 
         response = self.client.patch(
-            "/api/notifications/read-all/"
+            "/api/v1/notifications/read-all/"
         )
 
         self.assertEqual(
@@ -256,7 +256,7 @@ class SecurityTests(APITestCase):
         )
 
         response = self.client.get(
-            "/api/drivers/nearby/"
+            "/api/v1/drivers/nearby/"
         )
 
         self.assertEqual(
@@ -272,7 +272,7 @@ class SecurityTests(APITestCase):
     def test_missing_jwt_rejected_for_nearby_drivers(self):
 
         response = self.client.get(
-            "/api/drivers/nearby/",
+            "/api/v1/drivers/nearby/",
             {
                 "latitude": 17.3850,
                 "longitude": 78.4867,
@@ -323,7 +323,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.user1)
 
         response = self.client.get(
-            f"/api/rides/{ride.id}/"
+            f"/api/v1/rides/{ride.id}/"
         )
 
         self.assertEqual(
@@ -401,7 +401,7 @@ class SecurityTests(APITestCase):
         self.authenticate(self.driver)
 
         response = self.client.patch(
-            f"/api/rides/{ride.id}/status/",
+            f"/api/v1/rides/{ride.id}/status/",
             {
                 "status": "STARTED",
             },
@@ -419,3 +419,140 @@ class SecurityTests(APITestCase):
             ride.status,
             "REQUESTED",
         )
+    # ========================================================
+    # TEST 12
+    # ASSIGNED DRIVER CAN UPDATE OWN RIDE
+    # ========================================================
+
+    def test_assigned_driver_can_update_own_ride(self):
+
+        from business.models import (
+            Ride,
+            DriverProfile,
+            Vehicle,
+            VehicleType,
+            Location,
+        )
+
+        driver_profile = DriverProfile.objects.create(
+            user=self.driver,
+            license_number="SEC-LICENSE-003",
+            phone_number="9000000003",
+        )
+
+        vehicle_type = VehicleType.objects.create(
+            name="Security Test Car 2"
+        )
+
+        vehicle = Vehicle.objects.create(
+            driver=driver_profile,
+            vehicle_type=vehicle_type,
+            vehicle_number="SEC-VEH-003",
+            model_name="Test Model 2",
+            color="White",
+        )
+
+        pickup = Location.objects.create(
+            address="Pickup Location 2",
+            latitude=17.385000,
+            longitude=78.486700,
+        )
+
+        drop = Location.objects.create(
+            address="Drop Location 2",
+            latitude=17.400000,
+            longitude=78.500000,
+        )
+
+        ride = Ride.objects.create(
+            passenger=self.user1,
+            driver=driver_profile,
+            vehicle=vehicle,
+            ride_type=vehicle_type,
+            pickup_location=pickup,
+            drop_location=drop,
+            status="DRIVER_ARRIVING",
+        )
+
+        self.authenticate(self.driver)
+
+        response = self.client.patch(
+            f"/api/v1/rides/{ride.id}/status/",
+            {
+                "status": "STARTED",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        ride.refresh_from_db()
+
+        self.assertEqual(
+            ride.status,
+            "STARTED",
+        )  
+    # ========================================================
+    # TEST 13
+    # USER CANNOT MANIPULATE RIDE STATUS
+    # ========================================================
+
+    def test_user_cannot_update_ride_with_accept_status(self):
+
+        from business.models import (
+            Ride,
+            VehicleType,
+            Location,
+        )
+
+        vehicle_type = VehicleType.objects.create(
+            name="Security Test Status Car"
+        )
+
+        pickup = Location.objects.create(
+            address="Security Pickup",
+            latitude=17.385000,
+            longitude=78.486700,
+        )
+
+        drop = Location.objects.create(
+            address="Security Drop",
+            latitude=17.400000,
+            longitude=78.500000,
+        )
+
+        ride = Ride.objects.create(
+            passenger=self.user2,
+            ride_type=vehicle_type,
+            pickup_location=pickup,
+            drop_location=drop,
+        )
+
+        self.authenticate(self.user1)
+
+        response = self.client.patch(
+            f"/api/v1/rides/{ride.id}/status/",
+            {
+                "status": "ACCEPTED",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        ride.refresh_from_db()
+
+        self.assertEqual(
+            ride.status,
+            "REQUESTED",
+        )              
+
+
+
+

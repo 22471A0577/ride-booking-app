@@ -1,9 +1,13 @@
 import json
+import logging
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from .models import Ride
+
+
+logger = logging.getLogger(__name__)
 
 
 class RideConsumer(AsyncWebsocketConsumer):
@@ -14,9 +18,9 @@ class RideConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
 
-        print("\n========================================")
-        print("=== WEBSOCKET CONNECT START ===")
-        print("========================================")
+        logger.info(
+            "WebSocket connection attempt started"
+        )
 
         try:
 
@@ -28,9 +32,9 @@ class RideConsumer(AsyncWebsocketConsumer):
                 "url_route"
             ]["kwargs"]["ride_id"]
 
-            print(
-                "Ride ID:",
-                self.ride_id
+            logger.info(
+                "WebSocket connection requested | ride_id=%s",
+                self.ride_id,
             )
 
             # -------------------------------------------------
@@ -41,19 +45,16 @@ class RideConsumer(AsyncWebsocketConsumer):
                 "user"
             )
 
-            print(
-                "User:",
-                self.user
-            )
-
             # -------------------------------------------------
             # Authentication check
             # -------------------------------------------------
 
             if self.user is None:
 
-                print(
-                    "❌ USER IS NONE"
+                logger.warning(
+                    "WebSocket connection rejected | "
+                    "reason=missing_user | ride_id=%s",
+                    self.ride_id,
                 )
 
                 await self.close(
@@ -64,8 +65,10 @@ class RideConsumer(AsyncWebsocketConsumer):
 
             if not self.user.is_authenticated:
 
-                print(
-                    "❌ USER NOT AUTHENTICATED"
+                logger.warning(
+                    "WebSocket connection rejected | "
+                    "reason=unauthenticated_user | ride_id=%s",
+                    self.ride_id,
                 )
 
                 await self.close(
@@ -74,23 +77,12 @@ class RideConsumer(AsyncWebsocketConsumer):
 
                 return
 
-            print(
-                "=== USER AUTHENTICATED ==="
-            )
-
-            print(
-                "User ID:",
-                self.user.id
-            )
-
-            print(
-                "User email:",
-                self.user.email
-            )
-
-            print(
-                "User role:",
-                self.user.role
+            logger.info(
+                "WebSocket user authenticated | "
+                "user_id=%s | role=%s | ride_id=%s",
+                self.user.id,
+                getattr(self.user, "role", "UNKNOWN"),
+                self.ride_id,
             )
 
             # -------------------------------------------------
@@ -101,8 +93,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
             if not ride_access:
 
-                print(
-                    "❌ USER NOT AUTHORIZED FOR THIS RIDE"
+                logger.warning(
+                    "WebSocket ride access denied | "
+                    "user_id=%s | ride_id=%s",
+                    self.user.id,
+                    self.ride_id,
                 )
 
                 await self.close(
@@ -111,8 +106,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
                 return
 
-            print(
-                "=== RIDE AUTHORIZATION SUCCESS ==="
+            logger.info(
+                "WebSocket ride authorization successful | "
+                "user_id=%s | ride_id=%s",
+                self.user.id,
+                self.ride_id,
             )
 
             # -------------------------------------------------
@@ -123,9 +121,10 @@ class RideConsumer(AsyncWebsocketConsumer):
                 f"ride_{self.ride_id}"
             )
 
-            print(
-                "Room group:",
-                self.room_group_name
+            logger.info(
+                "WebSocket group created | "
+                "ride_id=%s",
+                self.ride_id,
             )
 
             # -------------------------------------------------
@@ -137,8 +136,10 @@ class RideConsumer(AsyncWebsocketConsumer):
                 self.channel_name
             )
 
-            print(
-                "=== GROUP ADD SUCCESS ==="
+            logger.info(
+                "WebSocket client added to ride group | "
+                "ride_id=%s",
+                self.ride_id,
             )
 
             # -------------------------------------------------
@@ -147,8 +148,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
             await self.accept()
 
-            print(
-                "=== WEBSOCKET ACCEPTED ==="
+            logger.info(
+                "WebSocket connection accepted | "
+                "ride_id=%s | user_id=%s",
+                self.ride_id,
+                self.user.id,
             )
 
             # -------------------------------------------------
@@ -169,28 +173,22 @@ class RideConsumer(AsyncWebsocketConsumer):
                 )
             )
 
-            print(
-                "=== INITIAL MESSAGE SENT ==="
+            logger.info(
+                "Initial WebSocket connection message sent | "
+                "ride_id=%s",
+                self.ride_id,
             )
 
-            print(
-                "=== WAITING FOR CLIENT MESSAGE ==="
-            )
+        except Exception:
 
-        except Exception as e:
-
-            print(
-                "\n❌ ERROR IN CONNECT"
-            )
-
-            print(
-                "Error type:",
-                type(e).__name__
-            )
-
-            print(
-                "Error:",
-                str(e)
+            logger.exception(
+                "WebSocket connection failed | "
+                "ride_id=%s",
+                getattr(
+                    self,
+                    "ride_id",
+                    "unknown",
+                ),
             )
 
             try:
@@ -200,7 +198,16 @@ class RideConsumer(AsyncWebsocketConsumer):
                 )
 
             except Exception:
-                pass
+
+                logger.exception(
+                    "Failed to close WebSocket after "
+                    "connection error | ride_id=%s",
+                    getattr(
+                        self,
+                        "ride_id",
+                        "unknown",
+                    ),
+                )
 
     # =========================================================
     # RIDE ACCESS CHECK
@@ -220,8 +227,12 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         except Ride.DoesNotExist:
 
-            print(
-                "❌ RIDE DOES NOT EXIST"
+            logger.warning(
+                "WebSocket ride access failed | "
+                "reason=ride_not_found | ride_id=%s | "
+                "user_id=%s",
+                self.ride_id,
+                self.user.id,
             )
 
             return False
@@ -232,8 +243,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         if self.user.role == "ADMIN":
 
-            print(
-                "✅ ADMIN ACCESS"
+            logger.info(
+                "WebSocket ride access granted | "
+                "role=ADMIN | user_id=%s | ride_id=%s",
+                self.user.id,
+                self.ride_id,
             )
 
             return True
@@ -244,8 +258,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         if ride.passenger_id == self.user.id:
 
-            print(
-                "✅ PASSENGER ACCESS"
+            logger.info(
+                "WebSocket ride access granted | "
+                "role=PASSENGER | user_id=%s | ride_id=%s",
+                self.user.id,
+                self.ride_id,
             )
 
             return True
@@ -259,8 +276,11 @@ class RideConsumer(AsyncWebsocketConsumer):
             and ride.driver.user_id == self.user.id
         ):
 
-            print(
-                "✅ ASSIGNED DRIVER ACCESS"
+            logger.info(
+                "WebSocket ride access granted | "
+                "role=DRIVER | user_id=%s | ride_id=%s",
+                self.user.id,
+                self.ride_id,
             )
 
             return True
@@ -269,8 +289,11 @@ class RideConsumer(AsyncWebsocketConsumer):
         # NO ACCESS
         # -----------------------------------------------------
 
-        print(
-            "❌ ACCESS DENIED"
+        logger.warning(
+            "WebSocket ride access denied | "
+            "user_id=%s | ride_id=%s",
+            self.user.id,
+            self.ride_id,
         )
 
         return False
@@ -284,13 +307,16 @@ class RideConsumer(AsyncWebsocketConsumer):
         close_code
     ):
 
-        print("\n========================================")
-        print("=== WEBSOCKET DISCONNECT ===")
-        print(
-            "Close code:",
-            close_code
+        logger.info(
+            "WebSocket disconnected | "
+            "ride_id=%s | close_code=%s",
+            getattr(
+                self,
+                "ride_id",
+                "unknown",
+            ),
+            close_code,
         )
-        print("========================================")
 
         if hasattr(
             self,
@@ -304,15 +330,26 @@ class RideConsumer(AsyncWebsocketConsumer):
                     self.channel_name
                 )
 
-                print(
-                    "=== GROUP DISCARD SUCCESS ==="
+                logger.info(
+                    "WebSocket client removed from ride group | "
+                    "ride_id=%s",
+                    getattr(
+                        self,
+                        "ride_id",
+                        "unknown",
+                    ),
                 )
 
-            except Exception as e:
+            except Exception:
 
-                print(
-                    "❌ GROUP DISCARD ERROR:",
-                    str(e)
+                logger.exception(
+                    "WebSocket group discard failed | "
+                    "ride_id=%s",
+                    getattr(
+                        self,
+                        "ride_id",
+                        "unknown",
+                    ),
                 )
 
     # =========================================================
@@ -325,13 +362,28 @@ class RideConsumer(AsyncWebsocketConsumer):
         bytes_data=None
     ):
 
-        print("\n========================================")
-        print("=== MESSAGE RECEIVED ===")
-        print(
-            "Text data:",
-            text_data
+        ride_id = getattr(
+            self,
+            "ride_id",
+            "unknown",
         )
-        print("========================================")
+
+        user_id = getattr(
+            getattr(
+                self,
+                "user",
+                None,
+            ),
+            "id",
+            "unknown",
+        )
+
+        logger.info(
+            "WebSocket message received | "
+            "ride_id=%s | user_id=%s",
+            ride_id,
+            user_id,
+        )
 
         # -----------------------------------------------------
         # Empty message
@@ -339,8 +391,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         if not text_data:
 
-            print(
-                "❌ EMPTY MESSAGE"
+            logger.warning(
+                "Empty WebSocket message received | "
+                "ride_id=%s | user_id=%s",
+                ride_id,
+                user_id,
             )
 
             return
@@ -357,8 +412,11 @@ class RideConsumer(AsyncWebsocketConsumer):
 
         except json.JSONDecodeError:
 
-            print(
-                "❌ INVALID JSON"
+            logger.warning(
+                "Invalid JSON received through WebSocket | "
+                "ride_id=%s | user_id=%s",
+                ride_id,
+                user_id,
             )
 
             await self.send(
@@ -374,18 +432,16 @@ class RideConsumer(AsyncWebsocketConsumer):
 
             return
 
-        print(
-            "Parsed data:",
-            data
-        )
-
         message_type = data.get(
             "type"
         )
 
-        print(
-            "Message type:",
-            message_type
+        logger.info(
+            "WebSocket message parsed | "
+            "ride_id=%s | user_id=%s | message_type=%s",
+            ride_id,
+            user_id,
+            message_type,
         )
 
         # =====================================================
@@ -408,6 +464,13 @@ class RideConsumer(AsyncWebsocketConsumer):
                 )
             )
 
+            logger.info(
+                "WebSocket ping handled | "
+                "ride_id=%s | user_id=%s",
+                ride_id,
+                user_id,
+            )
+
             return
 
         # =====================================================
@@ -422,8 +485,16 @@ class RideConsumer(AsyncWebsocketConsumer):
 
             if self.user.role != "DRIVER":
 
-                print(
-                    "❌ NON-DRIVER TRIED TO SEND LOCATION"
+                logger.warning(
+                    "Unauthorized driver location attempt | "
+                    "user_id=%s | ride_id=%s | role=%s",
+                    self.user.id,
+                    self.ride_id,
+                    getattr(
+                        self.user,
+                        "role",
+                        "UNKNOWN",
+                    ),
                 )
 
                 await self.send(
@@ -441,10 +512,12 @@ class RideConsumer(AsyncWebsocketConsumer):
                 return
 
             # -------------------------------------------------
-            # IMPORTANT FIX
+            # Get driver ID and coordinates
             # -------------------------------------------------
 
-            driver_id = str(self.user.id)
+            driver_id = str(
+                self.user.id
+            )
 
             latitude = data.get(
                 "latitude"
@@ -454,29 +527,18 @@ class RideConsumer(AsyncWebsocketConsumer):
                 "longitude"
             )
 
-            print(
-                "Driver ID:",
-                driver_id
-            )
-
-            print(
-                "Latitude:",
-                latitude
-            )
-
-            print(
-                "Longitude:",
-                longitude
-            )
-
             # -------------------------------------------------
             # Validate coordinates
             # -------------------------------------------------
 
             if latitude is None or longitude is None:
 
-                print(
-                    "❌ LOCATION COORDINATES MISSING"
+                logger.warning(
+                    "Driver location rejected because "
+                    "coordinates are missing | "
+                    "driver_id=%s | ride_id=%s",
+                    driver_id,
+                    self.ride_id,
                 )
 
                 await self.send(
@@ -497,29 +559,58 @@ class RideConsumer(AsyncWebsocketConsumer):
             # Broadcast driver location
             # -------------------------------------------------
 
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "driver_location_update",
-                    "driver_id": driver_id,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                }
-            )
+            try:
 
-            print(
-                "=== DRIVER LOCATION BROADCASTED ==="
-            )
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        "type": "driver_location_update",
+                        "driver_id": driver_id,
+                        "latitude": latitude,
+                        "longitude": longitude,
+                    }
+                )
+
+                logger.info(
+                    "Driver location broadcasted | "
+                    "driver_id=%s | ride_id=%s",
+                    driver_id,
+                    self.ride_id,
+                )
+
+            except Exception:
+
+                logger.exception(
+                    "Driver location broadcast failed | "
+                    "driver_id=%s | ride_id=%s",
+                    driver_id,
+                    self.ride_id,
+                )
+
+                await self.send(
+                    text_data=json.dumps(
+                        {
+                            "type": "error",
+                            "message": (
+                                "Unable to broadcast "
+                                "driver location."
+                            ),
+                        }
+                    )
+                )
 
             return
 
         # =====================================================
-        # UNKNOWN MESSAGE
+        # UNKNOWN MESSAGE TYPE
         # =====================================================
 
-        print(
-            "❌ UNKNOWN MESSAGE TYPE:",
-            message_type
+        logger.warning(
+            "Unknown WebSocket message type | "
+            "ride_id=%s | user_id=%s | message_type=%s",
+            ride_id,
+            user_id,
+            message_type,
         )
 
         await self.send(
@@ -543,45 +634,57 @@ class RideConsumer(AsyncWebsocketConsumer):
         event
     ):
 
-        print(
-            "=== DRIVER LOCATION EVENT ==="
+        logger.info(
+            "Driver location event received | "
+            "ride_id=%s | driver_id=%s",
+            getattr(
+                self,
+                "ride_id",
+                "unknown",
+            ),
+            event.get("driver_id"),
         )
 
-        print(
-            "Driver ID:",
-            event.get("driver_id")
-        )
+        try:
 
-        print(
-            "Latitude:",
-            event.get("latitude")
-        )
-
-        print(
-            "Longitude:",
-            event.get("longitude")
-        )
-
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "driver_location_update",
-                    "driver_id": event.get(
-                        "driver_id"
-                    ),
-                    "latitude": event.get(
-                        "latitude"
-                    ),
-                    "longitude": event.get(
-                        "longitude"
-                    ),
-                }
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "driver_location_update",
+                        "driver_id": event.get(
+                            "driver_id"
+                        ),
+                        "latitude": event.get(
+                            "latitude"
+                        ),
+                        "longitude": event.get(
+                            "longitude"
+                        ),
+                    }
+                )
             )
-        )
 
-        print(
-            "=== DRIVER LOCATION SENT TO CLIENT ==="
-        )
+            logger.info(
+                "Driver location sent to WebSocket client | "
+                "ride_id=%s",
+                getattr(
+                    self,
+                    "ride_id",
+                    "unknown",
+                ),
+            )
+
+        except Exception:
+
+            logger.exception(
+                "Failed to send driver location "
+                "to WebSocket client | ride_id=%s",
+                getattr(
+                    self,
+                    "ride_id",
+                    "unknown",
+                ),
+            )
 
     # =========================================================
     # RIDE STATUS EVENT
@@ -592,34 +695,53 @@ class RideConsumer(AsyncWebsocketConsumer):
         event
     ):
 
-        print(
-            "=== RIDE STATUS EVENT ==="
+        logger.info(
+            "Ride status event received | "
+            "ride_id=%s | status=%s",
+            getattr(
+                self,
+                "ride_id",
+                "unknown",
+            ),
+            event.get("status"),
         )
 
-        print(
-            "Status:",
-            event.get("status")
-        )
+        try:
 
-        print(
-            "Message:",
-            event.get("message")
-        )
-
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "ride_status_update",
-                    "status": event.get(
-                        "status"
-                    ),
-                    "message": event.get(
-                        "message"
-                    ),
-                }
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "ride_status_update",
+                        "status": event.get(
+                            "status"
+                        ),
+                        "message": event.get(
+                            "message"
+                        ),
+                    }
+                )
             )
-        )
 
-        print(
-            "=== RIDE STATUS SENT TO CLIENT ==="
-        )
+            logger.info(
+                "Ride status sent to WebSocket client | "
+                "ride_id=%s | status=%s",
+                getattr(
+                    self,
+                    "ride_id",
+                    "unknown",
+                ),
+                event.get("status"),
+            )
+
+        except Exception:
+
+            logger.exception(
+                "Failed to send ride status "
+                "to WebSocket client | ride_id=%s",
+                getattr(
+                    self,
+                    "ride_id",
+                    "unknown",
+                ),
+            )
+

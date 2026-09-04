@@ -133,3 +133,106 @@ class RideCreationTests(TestCase):
             "passenger",
             serializer.errors
         )
+    def test_ride_requires_ride_type(self):
+
+        data = {
+            "pickup_location": self.pickup.id,
+            "drop_location": self.drop.id,
+        }
+
+        serializer = RideSerializer(
+            data=data,
+            context={
+                "request": type(
+                    "Request",
+                    (),
+                    {"user": self.user}
+                )()
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+
+        self.assertIn(
+            "ride_type",
+            serializer.errors
+        )
+
+
+    def test_ride_requires_pickup_location(self):
+
+        data = {
+            "ride_type": self.vehicle_type.id,
+            "drop_location": self.drop.id,
+        }
+
+        serializer = RideSerializer(
+            data=data,
+            context={
+                "request": type(
+                    "Request",
+                    (),
+                    {"user": self.user}
+                )()
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+
+        self.assertIn(
+            "pickup_location",
+            serializer.errors
+        )
+
+
+    def test_ride_requires_drop_location(self):
+
+        data = {
+            "ride_type": self.vehicle_type.id,
+            "pickup_location": self.pickup.id,
+        }
+
+        serializer = RideSerializer(
+            data=data,
+            context={
+                "request": type(
+                    "Request",
+                    (),
+                    {"user": self.user}
+                )()
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+
+        self.assertIn(
+            "drop_location",
+            serializer.errors
+        )
+
+
+    def test_invalid_vehicle_type_rejected(self):
+
+        data = {
+            "ride_type": 999999,
+            "pickup_location": self.pickup.id,
+            "drop_location": self.drop.id,
+        }
+
+        serializer = RideSerializer(
+            data=data,
+            context={
+                "request": type(
+                    "Request",
+                    (),
+                    {"user": self.user}
+                )()
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+
+        self.assertIn(
+            "ride_type",
+            serializer.errors
+        )

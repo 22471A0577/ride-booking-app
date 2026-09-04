@@ -19,7 +19,7 @@ def get_available_driver_vehicle(driver):
     an active vehicle belonging to the driver.
     """
 
-    if not driver.is_available:
+    if driver.availability_status != DriverProfile.AvailabilityStatus.ONLINE:
         raise ValueError(
             "Driver is not available."
         )
@@ -45,6 +45,8 @@ def get_available_driver_vehicle(driver):
         )
 
     return vehicle
+
+
 def set_driver_availability(driver, is_available):
     """
     Update driver availability.
@@ -56,11 +58,7 @@ def set_driver_availability(driver, is_available):
     if is_available:
         active_ride = Ride.objects.filter(
             driver=driver,
-            status__in=[
-                RideStatus.ACCEPTED,
-                RideStatus.DRIVER_ARRIVING,
-                RideStatus.STARTED,
-            ],
+            status__in=ACTIVE_RIDE_STATUSES,
         ).exists()
 
         if active_ride:
@@ -69,11 +67,18 @@ def set_driver_availability(driver, is_available):
                 "while having an active ride."
             )
 
-    driver.is_available = is_available
+        driver.availability_status = (
+            DriverProfile.AvailabilityStatus.ONLINE
+        )
+
+    else:
+        driver.availability_status = (
+            DriverProfile.AvailabilityStatus.OFFLINE
+        )
 
     driver.save(
         update_fields=[
-            "is_available",
+            "availability_status",
             "updated_at",
         ]
     )

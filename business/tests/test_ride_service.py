@@ -85,3 +85,57 @@ class RideStatusTransitionTests(TestCase):
                 self.ride,
                 RideStatus.ACCEPTED,
             )
+    def test_accepted_to_driver_arriving(self):
+        self.ride.status = RideStatus.ACCEPTED
+        self.ride.save()
+
+        ride = change_ride_status(
+            self.ride,
+            RideStatus.DRIVER_ARRIVING,
+        )
+
+        self.assertEqual(
+            ride.status,
+            RideStatus.DRIVER_ARRIVING,
+        )
+
+
+    def test_driver_arriving_to_started(self):
+        self.ride.status = RideStatus.DRIVER_ARRIVING
+        self.ride.save()
+
+        ride = change_ride_status(
+            self.ride,
+            RideStatus.STARTED,
+        )
+
+        self.assertEqual(
+            ride.status,
+            RideStatus.STARTED,
+        )
+
+
+    def test_started_to_completed(self):
+        self.ride.status = RideStatus.STARTED
+        self.ride.save()
+
+        ride = change_ride_status(
+            self.ride,
+            RideStatus.COMPLETED,
+        )
+
+        self.assertEqual(
+            ride.status,
+            RideStatus.COMPLETED,
+        )
+
+
+    def test_cancelled_ride_cannot_be_started(self):
+        self.ride.status = RideStatus.CANCELLED
+        self.ride.save()
+
+        with self.assertRaises(ValueError):
+            change_ride_status(
+                self.ride,
+                RideStatus.STARTED,
+            )

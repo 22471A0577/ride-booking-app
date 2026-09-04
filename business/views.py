@@ -6,6 +6,15 @@ from rest_framework.pagination import PageNumberPagination
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from .utils.responses import (
+    success_response,
+    error_response,
+)
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiParameter,
+    OpenApiResponse,
+)
 
 from .models import (
     DriverProfile,
@@ -16,7 +25,22 @@ from .models import (
     Notification,
 )
 
+from .utils.constants import (
+    AUTHORIZATION_ERROR,
+    DRIVER_PROFILE_NOT_FOUND,
+    RIDE_NOT_FOUND,
+    INVALID_RIDE_STATUS,
+    INVALID_REQUEST,
+    INVALID_FARE_DATA,
+    INVALID_LOCATION,
+    INVALID_COORDINATES,
+    DRIVER_NOT_ASSIGNED,
+    NOTIFICATION_NOT_FOUND,
+    DRIVER_ONLY,
+)
+
 from .serializers import (
+
     DriverProfileSerializer,
     VehicleSerializer,
     RideSerializer,
@@ -58,8 +82,21 @@ from .services.ride_query_service import (
     get_total_driver_earnings,
     get_ride_statistics,
 )
-
-
+from .services.notification_service import (
+    create_notification,
+    notify_ride_requested,
+    notify_ride_accepted,
+    notify_driver_arriving,
+    notify_ride_started,
+    notify_ride_completed,
+    notify_ride_cancelled,
+    get_user_notifications,
+    get_notification_for_user,
+    mark_notification_as_read,
+    mark_all_notifications_as_read,
+)
+from rest_framework.throttling import UserRateThrottle
+from .throttles import RideCreationRateThrottle
 # ============================================================
 # DRIVER APIs
 # ============================================================
@@ -256,7 +293,62 @@ class VehicleDetailAPIView(
         return queryset.filter(
             is_active=True
         )
+@extend_schema(
+    tags=["rides"],
+    summary="List and create rides",
+    description=(
+        "Retrieve rides available to the authenticated user or create a "
+        "new ride request."
+    ),
+    responses={
+        200: OpenApiResponse(
+            response=RideSerializer,
+            description="Ride list retrieved successfully.",
+        ),
+        201: OpenApiResponse(
+            response=RideSerializer,
+            description="Ride created successfully.",
+        ),
+        400: OpenApiResponse(
+            description="Invalid ride request data.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication credentials were not provided or invalid.",
+        ),
+        429: OpenApiResponse(
+            description="Ride creation rate limit exceeded.",
+        ),
+    },
+)
 
+@extend_schema(
+    tags=["rides"],
+    summary="Retrieve ride details",
+    description=(
+        "Retrieve details of a ride accessible to the authenticated user."
+    ),
+    parameters=[
+        OpenApiParameter(
+            name="id",
+            type=str,
+            location=OpenApiParameter.PATH,
+            description="UUID of the ride.",
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=RideSerializer,
+            description="Ride details retrieved successfully.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+        404: OpenApiResponse(
+            description="Ride not found or not accessible.",
+        ),
+    },
+)
 
 # ============================================================
 # RIDE LIST / CREATE
@@ -312,6 +404,10 @@ class RideListCreateAPIView(
         serializer.save(
             passenger=self.request.user
         )
+    def get_throttles(self):
+        if self.request.method == "POST":
+            return [RideCreationRateThrottle()]
+        return super().get_throttles()    
 
 
 # ============================================================
@@ -396,140 +492,38 @@ class RideHistoryAPIView(APIView):
             serializer.data
         )
 
-
-# ============================================================
-# RIDE STATUS UPDATE
-# ============================================================
-
-class RideStatusUpdateAPIView(APIView):
-
-    permission_classes = [
-        IsAuthenticated
-    ]
-
-    def patch(self, request, pk):
-
-        try:
-
-            ride = (
-                Ride.objects
-                .select_related(
-                    "passenger",
-                    "driver__user",
-                    "vehicle",
-                    "ride_type",
-                    "pickup_location",
-                    "drop_location",
-                )
-                .get(pk=pk)
-            )
-
-        except Ride.DoesNotExist:
-
-            return Response(
-                {
-                    "success": False,
-                    "message": "Ride not found.",
-                    "data": None,
-                },
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        new_status = request.data.get(
-            "status"
-        )
-
-        if not new_status:
-
-            return Response(
-                {
-                    "success": False,
-                    "message": "Status is required.",
-                    "data": None,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        driver_statuses = [
-            RideStatus.DRIVER_ARRIVING,
-            RideStatus.STARTED,
-            RideStatus.COMPLETED,
-        ]
-
-        if new_status in driver_statuses:
-
-            if request.user.role != "DRIVER":
-
-                return Response(
-                    {
-                        "success": False,
-                        "message": (
-                            "Only drivers can update "
-                            "this ride status."
-                        ),
-                        "data": None,
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-            if not ride.driver:
-
-                return Response(
-                    {
-                        "success": False,
-                        "message": (
-                            "Ride has not been assigned "
-                            "to a driver."
-                        ),
-                        "data": None,
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if ride.driver.user_id != request.user.id:
-
-                return Response(
-                    {
-                        "success": False,
-                        "message": (
-                            "You are not the driver "
-                            "assigned to this ride."
-                        ),
-                        "data": None,
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        try:
-
-            ride = change_ride_status(
-                ride=ride,
-                new_status=new_status,
-            )
-
-        except ValueError as e:
-
-            return Response(
-                {
-                    "success": False,
-                    "message": str(e),
-                    "data": None,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return Response(
-            {
-                "success": True,
-                "message": (
-                    f"Ride status changed to {new_status}."
-                ),
-                "data": RideSerializer(
-                    ride
-                ).data,
-            },
-            status=status.HTTP_200_OK,
-        )
+@extend_schema(
+    tags=["rides"],
+    summary="Accept a ride",
+    description="Allows an authenticated driver to accept an available ride.",
+    parameters=[
+        OpenApiParameter(
+            name="id",
+            type=str,
+            location=OpenApiParameter.PATH,
+            description="UUID of the ride to accept.",
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=RideSerializer,
+            description="Ride accepted successfully.",
+        ),
+        400: OpenApiResponse(
+            description="Ride cannot be accepted or driver profile is unavailable.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+        403: OpenApiResponse(
+            description="Only drivers can accept rides.",
+        ),
+        404: OpenApiResponse(
+            description="Ride not found.",
+        ),
+    },
+)
 
 
 # ============================================================
@@ -614,6 +608,38 @@ class RideAcceptAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+@extend_schema(
+    tags=["rides"],
+    summary="Cancel a ride",
+    description="Cancel a ride for an authorized passenger or driver.",
+    parameters=[
+        OpenApiParameter(
+            name="id",
+            type=str,
+            location=OpenApiParameter.PATH,
+            description="UUID of the ride.",
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=RideSerializer,
+            description="Ride cancelled successfully.",
+        ),
+        400: OpenApiResponse(
+            description="Ride cannot be cancelled.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+        403: OpenApiResponse(
+            description="User is not authorized to cancel this ride.",
+        ),
+        404: OpenApiResponse(
+            description="Ride not found.",
+        ),
+    },
+)
 
 # ============================================================
 # RIDE CANCEL
@@ -695,6 +721,23 @@ class RideCancelAPIView(APIView):
             status=status.HTTP_200_OK,
         )
 
+@extend_schema(
+    tags=["fare"],
+    summary="Calculate ride fare",
+    description="Calculate the estimated fare using fare, distance, time, and surge information.",
+    request=FareCalculationSerializer,
+    responses={
+        200: OpenApiResponse(
+            description="Fare calculated successfully.",
+        ),
+        400: OpenApiResponse(
+            description="Invalid fare calculation data.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+    },
+)
 
 # ============================================================
 # FARE CALCULATION
@@ -1114,6 +1157,33 @@ class RideFilterAPIView(APIView):
             serializer.data
         )
 
+@extend_schema(
+    tags=["drivers"],
+    summary="Update driver location",
+    description=(
+        "Create or update the authenticated driver's current geographic "
+        "location. If the driver has an active ride, the location update "
+        "is also sent through the ride WebSocket channel."
+    ),
+    request=DriverLocationSerializer,
+    responses={
+        200: OpenApiResponse(
+            description="Driver location updated successfully.",
+        ),
+        201: OpenApiResponse(
+            description="Driver location created successfully.",
+        ),
+        400: OpenApiResponse(
+            description="Invalid location data or driver profile not found.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+        403: OpenApiResponse(
+            description="Only drivers can update their location.",
+        ),
+    },
+)
 
 # ============================================================
 # DRIVER LOCATION
@@ -1183,16 +1253,11 @@ class DriverLocationAPIView(APIView):
             "longitude"
         ]
 
-        location, created = (
-            DriverLocation.objects
-            .update_or_create(
-                driver=driver,
-                defaults={
-                    "latitude": latitude,
-                    "longitude": longitude,
-                },
-            )
-        )
+        location, created = update_driver_location(
+        driver=driver,
+        latitude=latitude,
+        longitude=longitude,
+)
 
         # ====================================================
         # ACTIVE RIDE
@@ -1268,6 +1333,204 @@ class DriverLocationAPIView(APIView):
             ),
         )
 
+
+@extend_schema(
+    tags=["rides"],
+    summary="Update ride status",
+    description=(
+        "Update a driver's assigned ride through the allowed lifecycle "
+        "statuses: DRIVER_ARRIVING, STARTED, or COMPLETED."
+    ),
+    parameters=[
+        OpenApiParameter(
+            name="id",
+            type=str,
+            location=OpenApiParameter.PATH,
+            description="UUID of the ride.",
+            required=True,
+        ),
+    ],
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "DRIVER_ARRIVING",
+                        "STARTED",
+                        "COMPLETED",
+                    ],
+                },
+            },
+            "required": ["status"],
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            response=RideSerializer,
+            description="Ride status updated successfully.",
+        ),
+        400: OpenApiResponse(
+            description="Invalid or missing ride status.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+        403: OpenApiResponse(
+            description="Only the assigned driver can update the ride.",
+        ),
+        404: OpenApiResponse(
+            description="Ride not found.",
+        ),
+    },
+)
+
+# ============================================================
+# RIDE STATUS UPDATE
+# ============================================================
+
+class RideStatusUpdateAPIView(APIView):
+
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+    def patch(self, request, pk):
+
+        try:
+
+            ride = (
+                Ride.objects
+                .select_related(
+                    "passenger",
+                    "driver__user",
+                    "vehicle",
+                    "ride_type",
+                    "pickup_location",
+                    "drop_location",
+                )
+                .get(pk=pk)
+            )
+
+        except Ride.DoesNotExist:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "Ride not found.",
+                    "data": None,
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        new_status = request.data.get(
+            "status"
+        )
+        allowed_driver_statuses = [
+            RideStatus.DRIVER_ARRIVING,
+            RideStatus.STARTED,
+            RideStatus.COMPLETED,
+        ]
+
+        if new_status not in allowed_driver_statuses:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        "Invalid status for this endpoint."
+                    ),
+                    "data": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not new_status:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "Status is required.",
+                    "data": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_status in allowed_driver_statuses:
+
+            if request.user.role != "DRIVER":
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Only drivers can update "
+                            "this ride status."
+                        ),
+                        "data": None,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if not ride.driver:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "Ride has not been assigned "
+                            "to a driver."
+                        ),
+                        "data": None,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if ride.driver.user_id != request.user.id:
+
+                return Response(
+                    {
+                        "success": False,
+                        "message": (
+                            "You are not the driver "
+                            "assigned to this ride."
+                        ),
+                        "data": None,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        try:
+
+            ride = change_ride_status(
+                ride=ride,
+                new_status=new_status,
+            )
+
+        except ValueError as e:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": str(e),
+                    "data": None,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    f"Ride status changed to {new_status}."
+                ),
+                "data": RideSerializer(
+                    ride
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 # ============================================================
 # NEARBY DRIVERS
@@ -1439,6 +1702,20 @@ class NotificationPagination(
 
     max_page_size = 100
 
+@extend_schema(
+    tags=["notifications"],
+    summary="List notifications",
+    description="Retrieve paginated notifications belonging to the authenticated user.",
+    responses={
+        200: OpenApiResponse(
+            response=NotificationSerializer(many=True),
+            description="Notifications retrieved successfully.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+    },
+)
 
 # ============================================================
 # NOTIFICATION LIST
@@ -1452,13 +1729,8 @@ class NotificationListAPIView(APIView):
 
     def get(self, request):
 
-        notifications = (
-            Notification.objects
-            .filter(
-                user=request.user
-            )
-            .select_related("ride")
-            .order_by("-created_at")
+        notifications = get_user_notifications(
+            request.user
         )
 
         paginator = NotificationPagination()
@@ -1478,10 +1750,32 @@ class NotificationListAPIView(APIView):
             serializer.data
         )
 
-
-# ============================================================
-# NOTIFICATION READ
-# ============================================================
+@extend_schema(
+    tags=["notifications"],
+    summary="Mark notification as read",
+    description="Mark a specific notification belonging to the authenticated user as read.",
+    parameters=[
+        OpenApiParameter(
+            name="id",
+            type=str,
+            location=OpenApiParameter.PATH,
+            description="UUID of the notification.",
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=NotificationSerializer,
+            description="Notification marked as read.",
+        ),
+        401: OpenApiResponse(
+            description="Authentication required.",
+        ),
+        404: OpenApiResponse(
+            description="Notification not found.",
+        ),
+    },
+)
 
 class NotificationReadAPIView(APIView):
 
@@ -1491,53 +1785,36 @@ class NotificationReadAPIView(APIView):
 
     def patch(self, request, pk):
 
-        try:
+        notification = get_notification_for_user(
+            notification_id=pk,
+            user=request.user,
+        )
 
-            notification = (
-                Notification.objects
-                .get(
-                    pk=pk,
-                    user=request.user,
-                )
-            )
-
-        except Notification.DoesNotExist:
-
+        if not notification:
             return Response(
                 {
                     "success": False,
-                    "message": (
-                        "Notification not found."
-                    ),
+                    "message": "Notification not found.",
                     "data": None,
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        notification.is_read = True
-
-        notification.save(
-            update_fields=[
-                "is_read"
-            ]
-        )
-
-        serializer = NotificationSerializer(
-            notification
+        notification = mark_notification_as_read(
+            notification_id=pk,
+            user=request.user,
         )
 
         return Response(
             {
                 "success": True,
-                "message": (
-                    "Notification marked as read."
-                ),
-                "data": serializer.data,
+                "message": "Notification marked as read.",
+                "data": NotificationSerializer(
+                    notification
+                ).data,
             },
             status=status.HTTP_200_OK,
         )
-
-
 # ============================================================
 # NOTIFICATION READ ALL
 # ============================================================
@@ -1550,15 +1827,8 @@ class NotificationReadAllAPIView(APIView):
 
     def patch(self, request):
 
-        updated_count = (
-            Notification.objects
-            .filter(
-                user=request.user,
-                is_read=False,
-            )
-            .update(
-                is_read=True
-            )
+        mark_all_notifications_as_read(
+            request.user
         )
 
         return Response(
@@ -1567,38 +1837,7 @@ class NotificationReadAllAPIView(APIView):
                 "message": (
                     "All notifications marked as read."
                 ),
-                "updated_count": updated_count,
+                "data": None,
             },
             status=status.HTTP_200_OK,
         )
-class BadRideListAPIView(APIView):
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-
-        rides = Ride.objects.all()[:20]
-
-        data = []
-
-        for ride in rides:
-
-            data.append({
-                "id": str(ride.id),
-                "passenger": ride.passenger.email,
-                "driver": (
-                    ride.driver.user.email
-                    if ride.driver
-                    else None
-                ),
-                "vehicle": (
-                    ride.vehicle.vehicle_number
-                    if ride.vehicle
-                    else None
-                ),
-                "ride_type": ride.ride_type.name,
-                "pickup": ride.pickup_location.address,
-                "drop": ride.drop_location.address,
-            })
-
-        return Response(data)

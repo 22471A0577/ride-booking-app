@@ -1,3 +1,4 @@
+import logging
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
@@ -11,6 +12,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 
 User = get_user_model()
 
+logger = logging.getLogger(__name__)
+
 
 class JWTAuthMiddleware(BaseMiddleware):
 
@@ -21,9 +24,9 @@ class JWTAuthMiddleware(BaseMiddleware):
         send
     ):
 
-        print("\n========================================")
-        print("=== JWT AUTH MIDDLEWARE STARTED ===")
-        print("========================================")
+        logger.info(
+            "JWT authentication middleware started"
+        )
 
         # =====================================================
         # GET QUERY STRING
@@ -35,22 +38,12 @@ class JWTAuthMiddleware(BaseMiddleware):
             .decode()
         )
 
-        print(
-            "Query string:",
-            query_string
-        )
-
         # =====================================================
         # PARSE QUERY PARAMETERS
         # =====================================================
 
         query_params = parse_qs(
             query_string
-        )
-
-        print(
-            "Query parameters:",
-            query_params
         )
 
         # =====================================================
@@ -63,8 +56,9 @@ class JWTAuthMiddleware(BaseMiddleware):
 
         if not token_list:
 
-            print(
-                "❌ NO JWT TOKEN FOUND"
+            logger.warning(
+                "WebSocket authentication failed | "
+                "reason=jwt_token_missing"
             )
 
             scope["user"] = None
@@ -77,13 +71,13 @@ class JWTAuthMiddleware(BaseMiddleware):
 
         token = token_list[0]
 
-        print(
-            "✅ JWT TOKEN RECEIVED"
-        )
+        # IMPORTANT:
+        # Never log the actual JWT token.
+        # JWT tokens are credentials.
 
-        # Don't print the actual token.
-        # JWT tokens are credentials and should not
-        # appear in application logs.
+        logger.info(
+            "JWT token received for WebSocket authentication"
+        )
 
         # =====================================================
         # VALIDATE JWT
@@ -101,8 +95,9 @@ class JWTAuthMiddleware(BaseMiddleware):
 
             if user is None:
 
-                print(
-                    "❌ USER NOT AUTHENTICATED"
+                logger.warning(
+                    "WebSocket authentication failed | "
+                    "reason=user_not_authenticated"
                 )
 
                 scope["user"] = None
@@ -113,32 +108,23 @@ class JWTAuthMiddleware(BaseMiddleware):
 
             else:
 
-                print(
-                    "✅ USER AUTHENTICATED"
-                )
-
-                print(
-                    "User ID:",
-                    user.id
-                )
-
-                print(
-                    "User email:",
-                    user.email
-                )
-
-                print(
-                    "User role:",
-                    user.role
+                logger.info(
+                    "WebSocket user authenticated | "
+                    "user_id=%s | role=%s",
+                    user.id,
+                    getattr(
+                        user,
+                        "role",
+                        "UNKNOWN",
+                    ),
                 )
 
                 scope["user"] = user
 
-        except Exception as e:
+        except Exception:
 
-            print(
-                "❌ JWT AUTHENTICATION ERROR:",
-                repr(e)
+            logger.exception(
+                "Unexpected JWT authentication error"
             )
 
             scope["user"] = None
@@ -173,8 +159,8 @@ class JWTAuthMiddleware(BaseMiddleware):
                 token
             )
 
-            print(
-                "✅ ACCESS TOKEN VALID"
+            logger.info(
+                "JWT access token validated successfully"
             )
 
             # ---------------------------------------------
@@ -185,15 +171,11 @@ class JWTAuthMiddleware(BaseMiddleware):
                 "user_id"
             )
 
-            print(
-                "Token user_id:",
-                user_id
-            )
-
             if not user_id:
 
-                print(
-                    "❌ user_id missing from token"
+                logger.warning(
+                    "JWT authentication failed | "
+                    "reason=user_id_missing"
                 )
 
                 return None
@@ -206,8 +188,10 @@ class JWTAuthMiddleware(BaseMiddleware):
                 id=user_id
             )
 
-            print(
-                "✅ USER FOUND IN DATABASE"
+            logger.info(
+                "JWT user found in database | "
+                "user_id=%s",
+                user.id,
             )
 
             # ---------------------------------------------
@@ -216,8 +200,10 @@ class JWTAuthMiddleware(BaseMiddleware):
 
             if not user.is_active:
 
-                print(
-                    "❌ USER IS INACTIVE"
+                logger.warning(
+                    "JWT authentication rejected | "
+                    "reason=user_inactive | user_id=%s",
+                    user.id,
                 )
 
                 return None
@@ -232,11 +218,11 @@ class JWTAuthMiddleware(BaseMiddleware):
         # INVALID / EXPIRED TOKEN
         # =================================================
 
-        except TokenError as e:
+        except TokenError:
 
-            print(
-                "❌ INVALID OR EXPIRED JWT TOKEN:",
-                str(e)
+            logger.warning(
+                "JWT authentication failed | "
+                "reason=invalid_or_expired_token"
             )
 
             return None
@@ -247,8 +233,9 @@ class JWTAuthMiddleware(BaseMiddleware):
 
         except User.DoesNotExist:
 
-            print(
-                "❌ USER DOES NOT EXIST"
+            logger.warning(
+                "JWT authentication failed | "
+                "reason=user_not_found"
             )
 
             return None
@@ -257,11 +244,11 @@ class JWTAuthMiddleware(BaseMiddleware):
         # OTHER DATABASE / AUTH ERROR
         # =================================================
 
-        except Exception as e:
+        except Exception:
 
-            print(
-                "❌ DATABASE/AUTH ERROR:",
-                repr(e)
+            logger.exception(
+                "Unexpected database or JWT authentication error"
             )
 
             return None
+

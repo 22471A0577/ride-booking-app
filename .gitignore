@@ -14,3 +14,13 @@ __pycache__/
 
 media/
 staticfiles/
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Load testing tokens
+locust_tokens.txt
+
+# Local settings backup
+config/settings_backup.py

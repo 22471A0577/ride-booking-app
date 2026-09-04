@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 
 from asgiref.sync import async_to_sync
@@ -5,6 +7,9 @@ from channels.layers import get_channel_layer
 
 from business.tasks import create_notification
 from business.models import Ride, RideStatus, Vehicle
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -61,19 +66,20 @@ def send_ride_status_update(ride_id, status_value):
     channel_layer = get_channel_layer()
 
     if channel_layer is None:
-        print("Channel layer is not configured")
+        logger.error(
+            "Channel layer is not configured"
+        )
         return
 
     group_name = f"ride_{ride_id}"
 
-    print("\n========================================")
-    print("=== SENDING RIDE STATUS UPDATE ===")
-    print("========================================")
-    print("Group:", group_name)
-    print("Status:", status_value)
+    logger.info(
+        "Sending ride status update | ride_id=%s | status=%s",
+        ride_id,
+        status_value,
+    )
 
     try:
-
         async_to_sync(
             channel_layer.group_send
         )(
@@ -87,13 +93,17 @@ def send_ride_status_update(ride_id, status_value):
             },
         )
 
-        print("=== RIDE STATUS UPDATE SENT ===")
+        logger.info(
+            "Ride status update sent | ride_id=%s | status=%s",
+            ride_id,
+            status_value,
+        )
 
-    except Exception as e:
-
-        print("WEBSOCKET STATUS UPDATE ERROR")
-        print("Error type:", type(e).__name__)
-        print("Error:", str(e))
+    except Exception:
+        logger.exception(
+            "WebSocket status update failed | ride_id=%s",
+            ride_id,
+        )
 
 
 # ============================================================
@@ -115,15 +125,15 @@ def change_ride_status(ride, new_status):
     User/role authorization belongs in the API view.
     """
 
-    print("\n========================================")
-    print("=== CHANGE RIDE STATUS START ===")
-    print("========================================")
-
     current_status = ride.status
 
-    print("Ride ID:", ride.id)
-    print("Current Status:", current_status)
-    print("New Status:", new_status)
+    logger.info(
+        "Changing ride status | ride_id=%s | "
+        "from=%s | to=%s",
+        ride.id,
+        current_status,
+        new_status,
+    )
 
     # --------------------------------------------------------
     # Validate transition
@@ -135,6 +145,14 @@ def change_ride_status(ride, new_status):
     )
 
     if new_status not in allowed_statuses:
+
+        logger.warning(
+            "Invalid ride status transition | ride_id=%s | "
+            "from=%s | to=%s",
+            ride.id,
+            current_status,
+            new_status,
+        )
 
         raise ValueError(
             f"Cannot change ride status "
@@ -154,9 +172,11 @@ def change_ride_status(ride, new_status):
         ],
     )
 
-    print("=== RIDE STATUS UPDATED IN DATABASE ===")
-    print("Ride ID:", ride.id)
-    print("Status:", ride.status)
+    logger.info(
+        "Ride status updated | ride_id=%s | status=%s",
+        ride.id,
+        ride.status,
+    )
 
     # --------------------------------------------------------
     # Convert IDs/status to strings
@@ -232,8 +252,12 @@ def change_ride_status(ride, new_status):
             )
         )
 
-    print("=== WEBSOCKET UPDATE REGISTERED ===")
-    print("=== NOTIFICATION TASK REGISTERED ===")
+    logger.info(
+        "Ride status update and notification tasks registered "
+        "| ride_id=%s | status=%s",
+        ride.id,
+        ride.status,
+    )
 
     # IMPORTANT:
     # Return the updated ride.
@@ -263,12 +287,11 @@ def accept_ride(ride_id, driver):
     10. Notify passenger after commit.
     """
 
-    print("\n========================================")
-    print("=== ACCEPT RIDE START ===")
-    print("========================================")
-
-    print("Ride ID:", ride_id)
-    print("Driver:", driver)
+    logger.info(
+        "Accept ride requested | ride_id=%s | driver_id=%s",
+        ride_id,
+        driver.id,
+    )
 
     # --------------------------------------------------------
     # Lock ride row
@@ -282,8 +305,9 @@ def accept_ride(ride_id, driver):
         )
     )
 
-    print(
-        "Current ride status:",
+    logger.info(
+        "Ride retrieved for acceptance | ride_id=%s | status=%s",
+        ride.id,
         ride.status,
     )
 
@@ -292,6 +316,14 @@ def accept_ride(ride_id, driver):
     # --------------------------------------------------------
 
     if ride.passenger_id == driver.user_id:
+
+        logger.warning(
+            "Ride acceptance rejected because passenger "
+            "and driver are the same user | ride_id=%s | "
+            "driver_id=%s",
+            ride.id,
+            driver.id,
+        )
 
         raise ValueError(
             "Passenger cannot be the same user as the driver."
@@ -303,6 +335,13 @@ def accept_ride(ride_id, driver):
 
     if ride.status != RideStatus.REQUESTED:
 
+        logger.warning(
+            "Ride acceptance rejected due to invalid status "
+            "| ride_id=%s | status=%s",
+            ride.id,
+            ride.status,
+        )
+
         raise ValueError(
             f"Ride cannot be accepted because "
             f"its current status is {ride.status}."
@@ -313,6 +352,13 @@ def accept_ride(ride_id, driver):
     # --------------------------------------------------------
 
     if driver.availability_status != "ONLINE":
+
+        logger.warning(
+            "Ride acceptance rejected because driver is "
+            "not available | ride_id=%s | driver_id=%s",
+            ride.id,
+            driver.id,
+        )
 
         raise ValueError(
             "Driver is not available."
@@ -336,6 +382,14 @@ def accept_ride(ride_id, driver):
 
     if active_ride:
 
+        logger.warning(
+            "Ride acceptance rejected because driver "
+            "already has an active ride | ride_id=%s | "
+            "driver_id=%s",
+            ride.id,
+            driver.id,
+        )
+
         raise ValueError(
             "Driver already has an active ride."
         )
@@ -357,6 +411,14 @@ def accept_ride(ride_id, driver):
     )
 
     if not vehicle:
+
+        logger.warning(
+            "Ride acceptance rejected because driver "
+            "has no active vehicle | ride_id=%s | "
+            "driver_id=%s",
+            ride.id,
+            driver.id,
+        )
 
         raise ValueError(
             "Driver does not have an active vehicle."
@@ -393,11 +455,13 @@ def accept_ride(ride_id, driver):
         ],
     )
 
-    print("=== RIDE ACCEPTED IN DATABASE ===")
-    print("Ride ID:", ride.id)
-    print("Driver ID:", driver.id)
-    print("Status:", ride.status)
-    print("Vehicle:", vehicle)
+    logger.info(
+        "Ride accepted successfully | ride_id=%s | "
+        "driver_id=%s | status=%s",
+        ride.id,
+        driver.id,
+        ride.status,
+    )
 
     # --------------------------------------------------------
     # IDs for background tasks
@@ -439,8 +503,12 @@ def accept_ride(ride_id, driver):
         )
     )
 
-    print("=== WEBSOCKET UPDATE REGISTERED ===")
-    print("=== NOTIFICATION TASK REGISTERED ===")
+    logger.info(
+        "Ride acceptance notifications registered "
+        "| ride_id=%s | driver_id=%s",
+        ride.id,
+        driver.id,
+    )
 
     return ride
 
@@ -464,20 +532,26 @@ def cancel_ride(ride, user):
     6. Notify assigned driver after commit.
     """
 
-    print("\n========================================")
-    print("=== CANCEL RIDE START ===")
-    print("========================================")
-
-    print("Ride ID:", ride.id)
-    print("Passenger:", ride.passenger)
-    print("User:", user)
-    print("Current Status:", ride.status)
+    logger.info(
+        "Ride cancellation requested | ride_id=%s | "
+        "user_id=%s | current_status=%s",
+        ride.id,
+        user.id,
+        ride.status,
+    )
 
     # --------------------------------------------------------
     # Check passenger ownership
     # --------------------------------------------------------
 
     if ride.passenger_id != user.id:
+
+        logger.warning(
+            "Ride cancellation rejected due to ownership "
+            "mismatch | ride_id=%s | user_id=%s",
+            ride.id,
+            user.id,
+        )
 
         raise PermissionError(
             "Only the passenger can cancel this ride."
@@ -491,6 +565,13 @@ def cancel_ride(ride, user):
         RideStatus.REQUESTED,
         RideStatus.ACCEPTED,
     ]:
+
+        logger.warning(
+            "Ride cancellation rejected due to invalid "
+            "status | ride_id=%s | status=%s",
+            ride.id,
+            ride.status,
+        )
 
         raise ValueError(
             f"Ride cannot be cancelled because "
@@ -514,9 +595,11 @@ def cancel_ride(ride, user):
         ],
     )
 
-    print("=== RIDE CANCELLED IN DATABASE ===")
-    print("Ride ID:", ride.id)
-    print("Status:", ride.status)
+    logger.info(
+        "Ride cancelled successfully | ride_id=%s | status=%s",
+        ride.id,
+        ride.status,
+    )
 
     # --------------------------------------------------------
     # Convert IDs to strings
@@ -560,7 +643,10 @@ def cancel_ride(ride, user):
             )
         )
 
-    print("=== WEBSOCKET UPDATE REGISTERED ===")
-    print("=== NOTIFICATION TASK REGISTERED ===")
+    logger.info(
+        "Ride cancellation notifications registered "
+        "| ride_id=%s",
+        ride.id,
+    )
 
     return ride
